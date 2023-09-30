@@ -12,6 +12,7 @@ accurate picture of the stable manifold of the fixed point in the first
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #define min(x, y) ((x) < (y) ? (x) : (y))
 #define max(x, y) ((x) > (y) ? (x) : (y))
@@ -24,11 +25,6 @@ accurate picture of the stable manifold of the fixed point in the first
 
 double modval[2] = {0.0, 0.0}; /* nonzero if X or Y is
                                 * taken modulo something */
-
-/* Gamma(0) is the fixed point, here determined
-* analytically ahead of time. */
-
-// double endpoint[2] = {0.88389626793, 0.88389626793}; /* gamma(0) */
 
 /* Gamma(1) is the fixed point together with a step of length JUMP in the
 * direction of the unstable eigenvector of the inverse map, here
@@ -48,31 +44,29 @@ double dbox[2] = {6.8, 6.8}; /* boxmax — boxmin */
 * the inverse Henon map with the usual parameters, Eq. (16).
 */
 
-void map(double *y, int m, double alpha, double beta) {
+void map(double *y, int m, double alpha, double beta, bool inverse) {
     int j;
     double xnext, ynext;
 
-    for (j=0; j<2*m;j++) {
-        xnext=y[1];
-        ynext=(y[1]*y[1] + y[0] - alpha) / beta;
-        y[0]=xnext;
-        y[1]=ynext;
+    if (inverse) {
+        for (j=0; j<2*m;j++) {
+            xnext=alpha-y[0]*y[0]+beta*y[1];
+            ynext=y[0];
+            y[0]=xnext;
+            y[1]=ynext;
+        }
+    } else {    
+        for (j=0; j<2*m;j++) {
+            xnext=y[1];
+            ynext=(y[1]*y[1] + y[0] - alpha) / beta;
+            y[0]=xnext;
+            y[1]=ynext;
+        }
     }
+
+
     return;
 }
-
-// void map(double *y, int m, double alpha, double beta) {
-//     int j;
-//     double xnext, ynext;
-
-//     for (j=0; j<2*m;j++) {
-//         xnext=alpha-y[0]*y[0]+beta*y[1];
-//         ynext=y[0];
-//         y[0]=xnext;
-//         y[1]=ynext;
-//     }
-//     return;
-// }
 
 /*---------------------------------------*/
 /* YCHANGE — Determine how far T^m(s) is from Y in units of pixels.
@@ -85,12 +79,12 @@ void map(double *y, int m, double alpha, double beta) {
 * interval [0, modval)
 */
 
-double ychange (double s, double *y, double *yc, int m, double endpoint[2], double dgamma[2], double alpha, double beta) {
+double ychange (double s, double *y, double *yc, int m, double endpoint[2], double dgamma[2], double alpha, double beta, bool inverse) {
     double dx, dy;
 
     yc[0] = endpoint[0] + s * dgamma[0];
     yc[1] = endpoint[1] + s * dgamma[1];
-    map(yc, m, alpha, beta);
+    map(yc, m, alpha, beta, inverse);
     dx = fabs(y[0] - yc[0] - modval[0]) / dbox[0];
     dy = fabs(y[1] - yc[1] - modval[1]) / dbox[1];
     dx = max(dx, dy);
@@ -103,10 +97,10 @@ double ychange (double s, double *y, double *yc, int m, double endpoint[2], doub
 * EPSILON from the image of Y.
 */
 
-double revise(double s, double ds, double *y, double *yc, int m, double endpoint[2], double dgamma[2], double alpha, double beta) {
+double revise(double s, double ds, double *y, double *yc, int m, double endpoint[2], double dgamma[2], double alpha, double beta, bool inverse) {
     double previous = ds, delta;
 
-    while(((delta = ychange(s + ds, y, yc, m, endpoint, dgamma, alpha, beta)) > JUMP || 
+    while(((delta = ychange(s + ds, y, yc, m, endpoint, dgamma, alpha, beta, inverse)) > JUMP || 
           (ds *= 0.2 + 0.8 / delta) <= previous * 0.5) && ds > TINY)
         ds = previous = previous * 0.5;
     ds = min(ds, previous * 2.0);
@@ -124,7 +118,7 @@ double revise(double s, double ds, double *y, double *yc, int m, double endpoint
 * of Y falls outside the box. In ether case, Y is set to the Kth iterate
 * and we retum K.
 */
-int iterate(double s, double *y, int m, int n, double endpoint[2], double dgamma[2], double alpha, double beta) {
+int iterate(double s, double *y, int m, int n, double endpoint[2], double dgamma[2], double alpha, double beta, bool inverse) {
     double prev[2];
     int ok; /*nonzero as long as we stay in the box */
     if (m == 0 || !inbox(y)) {
@@ -134,7 +128,7 @@ int iterate(double s, double *y, int m, int n, double endpoint[2], double dgamma
     }
     prev[0] = y[0]; prev[1] = y[1];
     if (m < n) do {
-        map(y, 1, alpha, beta);
+        map(y, 1, alpha, beta, inverse);
         if ((ok = inbox(y))) {
             prev[0] = y[0]; prev[1] = y[1];
         } else {
@@ -155,7 +149,7 @@ int iterate(double s, double *y, int m, int n, double endpoint[2], double dgamma
 * The latter command produces about 61,000 dots.
 */
 
-void calc_manifold(int n, double smax, double alpha, double beta, double endpoint[2], double eigvec[2], double* restrict xv, double* restrict yv, size_t capacity) {
+void calc_manifold(int n, double smax, double alpha, double beta, double endpoint[2], double eigvec[2], double* restrict xv, double* restrict yv, size_t capacity, bool inverse) {
     int ok = 0, m = 0;
     double s, y[2], yc[2];
     double ds = 1.0e-05; /* a reasonable first step size */
@@ -164,12 +158,12 @@ void calc_manifold(int n, double smax, double alpha, double beta, double endpoin
 
     for (s = 0.0; s < smax; s = min(s + ds, smax)) {
         if(!ok || m < n)
-            m = iterate(s, y, m, n, endpoint, dgamma, alpha, beta);
-        ds = revise(s, ds, y, yc, m, endpoint, dgamma, alpha, beta);
+            m = iterate(s, y, m, n, endpoint, dgamma, alpha, beta, inverse);
+        ds = revise(s, ds, y, yc, m, endpoint, dgamma, alpha, beta, inverse);
         if (m < n) { /* try going one more time */
-            map(y, 1, alpha, beta); map(yc, 1, alpha, beta);
+            map(y, 1, alpha, beta, inverse); map(yc, 1, alpha, beta, inverse);
             if (inbox(y) || inbox(yc))
-                ds = revise(s, ds, y, yc, ++m, endpoint, dgamma, alpha, beta);
+                ds = revise(s, ds, y, yc, ++m, endpoint, dgamma, alpha, beta, inverse);
         }
 
         y[0] = yc[0]; y[1] = yc[1];
